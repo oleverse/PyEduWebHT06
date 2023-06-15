@@ -1,6 +1,7 @@
 import datetime
 import logging
 import random
+import sys
 from pathlib import Path
 
 import faker.providers
@@ -8,6 +9,8 @@ from faker import Faker
 
 from config import get_db_params
 from connection import create_db_connection
+
+import pretty_tables
 
 DB_PARAMS = get_db_params('conf/db.ini')
 
@@ -25,16 +28,35 @@ subjects_provider = faker.providers.DynamicProvider(
 )
 
 
-def create_db_structure(sql_path):
-    if not Path(sql_path).exists():
+def insert_data(sql_statement, data):
+    with create_db_connection(*DB_PARAMS) as conn:
+        cursor = conn.cursor()
+        cursor.executemany(sql_statement, data)
+        conn.commit()
+        cursor.close()
+
+
+def execute_query_from_file(sql_path: Path):
+    if not sql_path.exists():
         logging.debug(f'"{sql_path}" does not exist')
         return False
 
     with open(sql_path, 'r') as sql_fh, create_db_connection(*DB_PARAMS) as conn:
         cursor = conn.cursor()
         cursor.execute(sql_fh.read(), multi=True)
-        logging.info("The structure has been created.")
+        result = cursor.fetchall()
+        if result:
+            result.insert(0, cursor.column_names)
+
         cursor.close()
+        return result
+
+
+def create_db_structure():
+    sql_path = Path('sql/db_structure.sql')
+    if isinstance(execute_query_from_file(sql_path), list):
+        logging.info("The structure has been created.")
+        return True
 
 
 def get_all_ids(table_name):
@@ -44,14 +66,6 @@ def get_all_ids(table_name):
         ids = [i[0] for i in cursor.fetchall()]
         cursor.close()
         return ids
-
-
-def insert_data(sql_statement, data):
-    with create_db_connection(*DB_PARAMS) as conn:
-        cursor = conn.cursor()
-        cursor.executemany(sql_statement, data)
-        conn.commit()
-        cursor.close()
 
 
 def add_students(students):
@@ -102,7 +116,6 @@ def seed_data():
     add_subjects(subjects)
 
     students_ids = get_all_ids('students')
-    students_count = len(students_ids)
     date_range = datetime.date(2018, 9, 1), datetime.date(2023, 6, 1)
     grades = []
     for student in students_ids:
@@ -113,4 +126,48 @@ def seed_data():
                        for _ in range(random.randint(15, 20))])
     add_grades(grades)
 
-    # logging.debug(real_faker.first_name())
+
+def show_query_results(query_path: Path):
+    print("Use Ctrl+C if you want to interrupt the script execution.")
+    if input('Do you want me to show SQL-query from the file? [y/N]: ').lower() == 'y':
+        with open(query_path) as q_fh:
+            file_name = f' File "{query_path}" '
+            header = f'{file_name:#^80}'
+            print(header)
+            for i, line in enumerate(q_fh):
+                print(f'\t{line}' if i > 1 else '', end='')
+            print(f'\n{"#" * len(header)}')
+
+    if input('Do you want me to show SQL-query results? [Y/n]: ').lower() != 'n':
+        if isinstance(data := execute_query_from_file(query_path), list):
+            if not data:
+                print('We got an empty set! Check the parameter of the query!')
+            else:
+                pretty = pretty_tables.create(headers=list(data[0]), rows=[list(d) for d in data[1:]])
+                print(pretty, end='\n\n')
+
+
+def queries_demo():
+    for i in range(1, 11):
+        query_path = Path(f'sql/{i:02}.sql')
+
+        with open(query_path) as q_fh:
+            print(f'Task-{i:02}: {q_fh.readline()[3:].rstrip()}')
+
+        try:
+            show_query_results(query_path)
+        except KeyboardInterrupt:
+            print('\nBye!')
+            break
+
+
+def drop_database_tables():
+    print('It seems you already ran the demo before!')
+    try:
+        answer = input("Do you want me to DROP all the tables from the DB? [y/N]").lower()
+        if answer == 'y':
+            execute_query_from_file(Path('sql/db_drop.sql'))
+            print("All database tables have been dropped. Starting the demo from scratch!")
+    except KeyboardInterrupt:
+        print('\nBye!')
+        sys.exit()

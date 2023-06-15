@@ -1,0 +1,1 @@
+DROP TABLE `students`, `grades`, `teachers`, `subjects`, `groups`;

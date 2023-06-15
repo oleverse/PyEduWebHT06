@@ -3,7 +3,8 @@
 SELECT CONCAT(s.first_name, ' ', s.last_name) `student`,
     gr.name `group`,
     sbj.name `subject`,
-    g.mark
+    g.mark,
+    g.got_at `date`
 FROM grades g
     JOIN students s ON s.id = g.student_id
     JOIN subjects sbj ON sbj.id = g.subject_id
